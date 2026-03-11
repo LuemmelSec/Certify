@@ -13,6 +13,10 @@ namespace Certify.Lib
 {
     class DisplayUtil
     {
+        // LdapOperations instance for SID resolution
+        // Set this before calling Display methods for proper SID resolution on non-domain joined systems
+        public static LdapOperations LdapOps { get; set; }
+
         public static void PrintPkiObjectControllers(Dictionary<string, List<Tuple<string, string>>> object_controllers, bool hide_admins)
         {
             foreach (var object_controller in object_controllers.OrderBy(o => GetUserNameFromSid(o.Key)))
@@ -368,6 +372,22 @@ namespace Certify.Lib
 
         public static string GetUserNameFromSid(string sid)
         {
+            // Try LDAP-based resolution first (works on non-domain joined systems)
+            if (LdapOps != null)
+            {
+                try
+                {
+                    var name = LdapOps.GetNameFromSid(sid);
+                    if (!string.IsNullOrEmpty(name))
+                        return name;
+                }
+                catch
+                {
+                    // Fall through to Translate() method
+                }
+            }
+
+            // Fallback to local resolution (may fail on non-domain joined systems)
             try
             {
                 var sid_object = new SecurityIdentifier(sid);

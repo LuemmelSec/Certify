@@ -10,6 +10,8 @@ namespace Certify.Lib
     {
         public string ConfigurationPath { get; }
         public string LdapServer { get; }
+        public string DefaultNamingContext { get; }
+        private string DomainRoot { get; }
 
         public LdapOperations()
             : this(null, null)
@@ -27,12 +29,98 @@ namespace Certify.Lib
                 root_dse_path = $"LDAP://{domain}/RootDSE";
 
             using (var root_dse = new DirectoryEntry(root_dse_path))
+            {
                 ConfigurationPath = $"{root_dse.Properties["configurationNamingContext"][0]}";
+                DefaultNamingContext = $"{root_dse.Properties["defaultNamingContext"][0]}";
+            }
 
             if (server == null)
+            {
                 LdapServer = string.Empty;
+                DomainRoot = string.Empty;
+            }
             else
+            {
                 LdapServer = $"{server}/";
+                DomainRoot = $"LDAP://{server}/";
+            }
+        }
+
+        // Resolve SID to account name using LDAP query
+        // This works on non-domain joined systems with domain credentials
+        public string GetNameFromSid(string sid)
+        {
+            if (string.IsNullOrEmpty(sid))
+                return null;
+
+            try
+            {
+                // For well-known SIDs, try local resolution first
+                if (sid.StartsWith("S-1-5-32-") || sid.StartsWith("S-1-5-18") || sid.StartsWith("S-1-1-"))
+                {
+                    try
+                    {
+                        var sid_object = new System.Security.Principal.SecurityIdentifier(sid);
+                        return sid_object.Translate(typeof(System.Security.Principal.NTAccount)).ToString();
+                    }
+                    catch
+                    {
+                        // Fall through to LDAP lookup
+                    }
+                }
+
+                // Use Global Catalog for forest-wide SID lookup
+                // GC:// searches across all domains in the forest
+                string gc_path;
+                if (string.IsNullOrEmpty(LdapServer))
+                    gc_path = "GC://";
+                else
+                    gc_path = $"GC://{LdapServer.TrimEnd('/')}";
+
+                using (var searcher = new DirectorySearcher(new DirectoryEntry(gc_path)))
+                {
+                    searcher.Filter = $"(objectSid={ConvertSidToLdapFilter(sid)})";
+                    searcher.PropertiesToLoad.Add("sAMAccountName");
+                    searcher.PropertiesToLoad.Add("name");
+                    searcher.SearchScope = SearchScope.Subtree;
+
+                    var result = searcher.FindOne();
+                    if (result != null)
+                    {
+                        if (result.Properties.Contains("sAMAccountName"))
+                            return result.Properties["sAMAccountName"][0].ToString();
+                        else if (result.Properties.Contains("name"))
+                            return result.Properties["name"][0].ToString();
+                    }
+                }
+            }
+            catch
+            {
+                // Silently fail and return null
+            }
+
+            return null;
+        }
+
+        // Convert SID string to LDAP filter format
+        private string ConvertSidToLdapFilter(string sid)
+        {
+            try
+            {
+                var sid_object = new System.Security.Principal.SecurityIdentifier(sid);
+                var sid_bytes = new byte[sid_object.BinaryLength];
+                sid_object.GetBinaryForm(sid_bytes, 0);
+
+                var hex_string = "";
+                foreach (byte b in sid_bytes)
+                    hex_string += $"\\{b:x2}";
+
+                return hex_string;
+            }
+            catch
+            {
+                return sid;
+            }
         }
 
         public IEnumerable<PKIObject> GetPKIObjects()

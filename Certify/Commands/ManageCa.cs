@@ -141,6 +141,10 @@ namespace Certify.Commands
                     var deleted_temps = template_pairs.RemoveAll(t => opts.ToggleTemplates.Contains(t.Item1, StringComparer.OrdinalIgnoreCase));
 
                     var ldap = new LdapOperations(opts.Domain, opts.LdapServer);
+                    
+                    // Set LdapOps for SID resolution on non-domain joined systems
+                    DisplayUtil.LdapOps = ldap;
+                    
                     var ldap_temps = ldap.GetCertificateTemplates().Where(t => t.Name != null);
 
                     var unidentified = add_templates.Where(t => !ldap_temps.Any(x => t.Equals(x.Name, StringComparison.OrdinalIgnoreCase))).ToList();

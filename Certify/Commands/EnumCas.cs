@@ -60,6 +60,9 @@ namespace Certify.Commands
 
             var ldap = new LdapOperations(opts.Domain, opts.LdapServer);
 
+            // Set LdapOps for SID resolution on non-domain joined systems
+            DisplayUtil.LdapOps = ldap;
+
             Console.WriteLine($"[*] Using the search base '{ldap.ConfigurationPath}'");
 
             List<string> user_sids = null;
