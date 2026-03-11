@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.DirectoryServices;
 using System.Linq;
@@ -82,15 +82,32 @@ namespace Certify.Lib
                     searcher.Filter = $"(objectSid={ConvertSidToLdapFilter(sid)})";
                     searcher.PropertiesToLoad.Add("sAMAccountName");
                     searcher.PropertiesToLoad.Add("name");
+                    searcher.PropertiesToLoad.Add("distinguishedName");
                     searcher.SearchScope = SearchScope.Subtree;
 
                     var result = searcher.FindOne();
                     if (result != null)
                     {
+                        string accountName = null;
+                        
                         if (result.Properties.Contains("sAMAccountName"))
-                            return result.Properties["sAMAccountName"][0].ToString();
+                            accountName = result.Properties["sAMAccountName"][0].ToString();
                         else if (result.Properties.Contains("name"))
-                            return result.Properties["name"][0].ToString();
+                            accountName = result.Properties["name"][0].ToString();
+                        
+                        if (!string.IsNullOrEmpty(accountName))
+                        {
+                            // Extract domain from DN (DC=domain,DC=com -> DOMAIN)
+                            if (result.Properties.Contains("distinguishedName"))
+                            {
+                                var dn = result.Properties["distinguishedName"][0].ToString();
+                                var domain = ExtractDomainFromDN(dn);
+                                if (!string.IsNullOrEmpty(domain))
+                                    return $"{domain}\\{accountName}";
+                            }
+                            
+                            return accountName;
+                        }
                     }
                 }
             }
@@ -100,6 +117,41 @@ namespace Certify.Lib
             }
 
             return null;
+        }
+
+        // Extract NetBIOS domain name from Distinguished Name
+        // DC=contoso,DC=com -> CONTOSO
+        private string ExtractDomainFromDN(string dn)
+        {
+            if (string.IsNullOrEmpty(dn))
+                return null;
+
+            try
+            {
+                // Find the first DC= component
+                var dcIndex = dn.IndexOf("DC=", StringComparison.OrdinalIgnoreCase);
+                if (dcIndex == -1)
+                    return null;
+
+                // Extract all DC components
+                var dcPart = dn.Substring(dcIndex);
+                var dcComponents = new List<string>();
+
+                foreach (var part in dcPart.Split(','))
+                {
+                    var trimmed = part.Trim();
+                    if (trimmed.StartsWith("DC=", StringComparison.OrdinalIgnoreCase))
+                        dcComponents.Add(trimmed.Substring(3));
+                }
+
+                // Return the first component (NetBIOS-style domain name)
+                // For full FQDN, you could return string.Join(".", dcComponents)
+                return dcComponents.Count > 0 ? dcComponents[0].ToUpper() : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         // Convert SID string to LDAP filter format
